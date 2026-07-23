@@ -5,24 +5,38 @@ use antixt::{Context, Html, html, view};
 
 pub fn page(_context: Context<'_>) -> Html {
     let small = table(&[
-        ("Cold release build", "861 ms"),
-        ("No-change release build", "37 ms"),
-        ("One-file application edit", "231 ms"),
-        ("Render process", "1.76 ms"),
-        ("Native server", "558,304 B"),
+        ("Cold release build", "1,155 ms"),
+        ("No-change release build", "40 ms"),
+        ("One-file application edit", "267 ms"),
+        ("Render process", "1.67 ms"),
+        ("Native server", "605,600 B"),
+        ("Ordinary route JavaScript", "0 B"),
+    ]);
+    let storefront = table(&[
+        ("Products", "12"),
+        ("Page + layout catalog loads", "1"),
+        ("Cold / no-change build", "899 / 37 ms"),
+        ("Render process", "1.60 ms"),
+        ("Throughput at concurrency 50", "16,960 req/s"),
+        ("p50 / p95 / p99", "2.66 / 4.43 / 5.70 ms"),
         ("Ordinary route JavaScript", "0 B"),
     ]);
     let scale = table(&[
         ("Routes", "1,000"),
-        ("Cold / warm check", "448 / 61 ms"),
-        ("Cold / no-change build", "1,968 / 62 ms"),
-        ("Shared leaf edit", "1,048 ms"),
-        ("Throughput at concurrency 50", "17,320 req/s"),
-        ("p50 / p95 / p99", "2.40 / 4.41 / 8.90 ms"),
-        ("RSS after load", "2.85 MB"),
+        ("Cold / warm check", "456 / 60 ms"),
+        ("Cold / no-change build", "1,628 / 60 ms"),
+        ("Shared leaf edit", "973 ms"),
+        ("Throughput at concurrency 50", "16,452 req/s"),
+        ("p50 / p95 / p99", "2.14 / 6.76 / 13.02 ms"),
+        ("RSS after load", "2.80 MB"),
     ]);
     let content = html::fragment()
         .child(section("canonical", "Seven-route application", small))
+        .child(section(
+            "storefront",
+            "Typed-state storefront",
+            storefront,
+        ))
         .child(section("scale", "1,000 routes and HTTP load", scale))
         .child(section(
             "reading-results",

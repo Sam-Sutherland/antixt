@@ -1,9 +1,16 @@
 use crate::components::docs::{code_block, feature_link};
+use crate::components::state::SiteMetadata;
 use crate::components::theme;
 use antixt::css::{self, Breakpoint, u};
 use antixt::{Context, Html, view};
 
-pub fn page(_context: Context<'_>) -> Html {
+pub fn page(context: Context<'_>) -> Html {
+    let site = context
+        .state::<SiteMetadata>()
+        .expect("SiteMetadata is configured");
+    let version = context
+        .memoize_sync("docs-version", || site.version.to_owned())
+        .expect("request is active");
     let features = [
         feature_link(
             "/docs/routing",
@@ -43,7 +50,7 @@ pub fn page(_context: Context<'_>) -> Html {
                 css::at(Breakpoint::Large, theme::GRID_COLS_HERO),
             ]] {
                 div {
-                    (eyebrow("The Rust web framework after Next."))
+                    (eyebrow(&format!("{} — The Rust web framework after Next.", version)))
                     h1 [styles = [
                         theme::MAX_W_3XL,
                         u::M_0,

@@ -26,6 +26,7 @@ pub struct ClientSource {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Project {
     pub directory: PathBuf,
+    pub config: Option<PathBuf>,
     pub components: Option<PathBuf>,
     pub routes: Vec<RouteSource>,
     pub clients: Vec<ClientSource>,

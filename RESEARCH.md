@@ -316,6 +316,49 @@ It does not yet solve application-defined theme types, property conflict
 diagnostics, cascade layers, container queries, stylesheet caching, CSP-safe
 external extraction, or utility CSS in long-lived streamed documents.
 
+## antixt v0.4 request data experiment
+
+v0.4 added an optional `app/config.rs` convention without introducing a source
+parser. Generated wiring constructs an `Application`, invokes the ordinary Rust
+configuration function, and exits with a readable startup error if registration
+fails. State is keyed by Rust `TypeId`; duplicate types return `StartupError` and
+missing request state returns `StateError`.
+
+Each request owns a scope shared by cloned `Context` values passed to its page
+and ancestor layouts. The scope contains a monotonically increasing request ID,
+start time, cancellation token, and heterogeneous memo table. `memoize_sync`
+supports normal page/layout composition. Async `memoize` lets concurrent callers
+share the same in-flight future result; tests confirmed two request threads
+executed one producer and received the same `Arc<T>`. Cache identity includes
+the key type, key value, and result type, and the complete scope is discarded at
+the end of the request.
+
+`RequestLifecycle` observers receive typed start and finish records with method,
+path, status, latency, cancellation, and disconnect state. Cancellation wakes
+memo waiters and can be observed by handlers. In the standard-library server it
+remains cooperative: a transport disconnect is known only when response writing
+fails, so arbitrary blocking work cannot yet be pre-empted.
+
+The fragment runtime now keeps one `AbortController` per target. A newer update
+aborts the previous fetch and stale responses cannot replace current content.
+This adds latest-request-wins behavior without changing zero-JavaScript pages.
+
+The disposable storefront benchmark registered a typed catalog and observer,
+rendered 12 product cards, and reused one catalog query across the page and root
+layout. Its document asserted one catalog load and no client runtime. This local
+sample measured:
+
+| Measurement | v0.4 storefront |
+|---|---:|
+| Check / first release build | 383 / 899 ms |
+| No-change release build | 37 ms |
+| Median render process | 1.60 ms |
+| Rendered HTML / server binary | 2,846 / 622,416 B |
+| Throughput at concurrency 50 | 16,959.85 req/s |
+| p50 / p95 / p99 | 2.66 / 4.43 / 5.70 ms |
+
+Source: [`benchmark/antixt-storefront-results.json`](benchmark/antixt-storefront-results.json).
+
 ## Adjacent framework research and inspiration
 
 Research into experimental Rust-first, server-rendered frameworks exposed a
@@ -335,7 +378,7 @@ table and a small standard-library HTTP server.
 | Assets | Compile-time declarations discovered in the binary, then content-hashed into a manifest | Embedded framework client modules; no general asset pipeline yet |
 | CSS and UI | Optional Tailwind integration and a source-vendored UI component registry | Rust-typed utility values with render-time dead-style elimination |
 | Dependency policy | Feature-gated multi-crate workspace with a broad ecosystem surface | No third-party runtime or build dependencies |
-| Default JavaScript | None for non-interactive pages; the reactive runtime is opt-in | None for ordinary pages; the 2.4 KB enhancement runtime is opt-in |
+| Default JavaScript | None for non-interactive pages; the reactive runtime is opt-in | None for ordinary pages; the 2.9 KB enhancement runtime is opt-in |
 
 One novel pattern is a dual-target reactive expression. An expression is
 type-checked and evaluated as Rust for the first server render, then translated
@@ -458,23 +501,21 @@ localhost run against tiny responses and a deliberately minimal HTTP stack.
 
 1. Define a server-backend interface and benchmark an optional bounded async
    production engine against the standard-library reference engine.
-2. Add typed application context and request-scoped memoization with concurrent
-   work deduplication.
-3. Build a content-hashed asset manifest with immutable caching, stale cleanup,
+2. Build a content-hashed asset manifest with immutable caching, stale cleanup,
    integrity metadata, and CSP-compatible stylesheet extraction.
-4. Evolve fragments into typed server actions with authorization hooks,
-   coalescing, cancellation, and stale-response suppression.
-5. Add pathless route groups, route-local middleware/layers, typed route errors,
+3. Evolve fragments into typed server actions with authorization hooks and
+   coalescing; v0.4 already aborts stale browser requests and suppresses their
+   responses.
+4. Add pathless route groups, route-local middleware/layers, typed route errors,
    multipart forms, and an explicit manual-router escape hatch.
-6. Prototype a source-owned `antixt ui add` registry whose components compose
+5. Prototype a source-owned `antixt ui add` registry whose components compose
    typed utilities and retain update provenance.
-7. Build a parity-checked storefront benchmark against Next.js, another
-   full-stack Rust framework, and a minimal Rust baseline; measure one-core and
-   all-core saturation, fixed-rate latency, response bytes, memory, and raw
-   result metadata.
-8. Build dependency-directed debug invalidation and preserve island state across
+6. Extend the v0.4 storefront into cross-framework parity fixtures against
+   Next.js, another full-stack Rust framework, and a minimal Rust baseline; add
+   one-core, fixed-rate, response-size, and memory runs.
+7. Build dependency-directed debug invalidation and preserve island state across
    development reloads.
-9. Audit context-specific escaping, HTTP correctness, slow clients, proxies,
+8. Audit context-specific escaping, HTTP correctness, slow clients, proxies,
    security limits, and sustained load before considering production use.
-10. Compare the Rust HTML macro against a larger application for ergonomics,
-    accessibility, compile-error quality, and whether rustfmt remains sufficient.
+9. Compare the Rust HTML macro against a larger application for ergonomics,
+   accessibility, compile-error quality, and whether rustfmt remains sufficient.

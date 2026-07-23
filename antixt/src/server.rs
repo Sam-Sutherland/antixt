@@ -1,15 +1,18 @@
 use crate::Html;
+use std::any::{Any, TypeId, type_name};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 
@@ -29,6 +32,7 @@ const RELOAD_CLIENT: &str = r#"<script data-antixt-dev>
 const CLIENT_RUNTIME: &str = r#"<script data-antixt-client>
 (() => {
   const clientVersion = '__ANTIXT_CLIENT_QUERY__';
+  const pending = new WeakMap();
   const mount = async (root = document) => {
     for (const island of root.querySelectorAll('[data-antixt-island]:not([data-antixt-mounted])')) {
       island.setAttribute('data-antixt-mounted', '');
@@ -39,15 +43,30 @@ const CLIENT_RUNTIME: &str = r#"<script data-antixt-client>
     }
   };
   const update = async (source, method, url, body) => {
-    const response = await fetch(url, { method, body, headers: { 'antixt-fragment': 'true' } });
-    if (response.redirected) { location.assign(response.url); return; }
     const selector = source.getAttribute('data-antixt-target');
     const target = selector ? document.querySelector(selector) : source;
     if (!target) return;
-    const html = await response.text();
-    if (source.getAttribute('data-antixt-swap') === 'outer') target.outerHTML = html;
-    else target.innerHTML = html;
-    await mount(document);
+    pending.get(target)?.abort();
+    const controller = new AbortController();
+    pending.set(target, controller);
+    try {
+      const response = await fetch(url, {
+        method,
+        body,
+        signal: controller.signal,
+        headers: { 'antixt-fragment': 'true' },
+      });
+      if (response.redirected) { location.assign(response.url); return; }
+      const html = await response.text();
+      if (pending.get(target) !== controller) return;
+      if (source.getAttribute('data-antixt-swap') === 'outer') target.outerHTML = html;
+      else target.innerHTML = html;
+      await mount(document);
+    } catch (error) {
+      if (error.name !== 'AbortError') console.error('antixt fragment failed:', error);
+    } finally {
+      if (pending.get(target) === controller) pending.delete(target);
+    }
   };
   document.addEventListener('click', event => {
     const explicit = event.target.closest('[data-antixt-get],[data-antixt-post]');
@@ -181,7 +200,508 @@ struct CapturedParam<'a> {
     value: &'a str,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StartupError {
+    message: String,
+}
+
+impl StartupError {
+    fn duplicate_state(type_name: &'static str) -> Self {
+        Self {
+            message: format!("application state `{type_name}` is already registered"),
+        }
+    }
+}
+
+impl fmt::Display for StartupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl std::error::Error for StartupError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StateError {
+    type_name: &'static str,
+}
+
+impl StateError {
+    pub const fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+}
+
+impl fmt::Display for StateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "application state `{}` is not registered",
+            self.type_name
+        )
+    }
+}
+
+impl std::error::Error for StateError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoError {
+    message: &'static str,
+}
+
+impl MemoError {
+    fn cancelled() -> Self {
+        Self {
+            message: "request was cancelled",
+        }
+    }
+
+    fn type_mismatch() -> Self {
+        Self {
+            message: "request memoization value type did not match its key",
+        }
+    }
+}
+
+impl fmt::Display for MemoError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl std::error::Error for MemoError {}
+
+#[derive(Clone, Default)]
+pub struct CancellationToken {
+    inner: Arc<CancellationState>,
+}
+
+#[derive(Default)]
+struct CancellationState {
+    cancelled: AtomicBool,
+    wakers: Mutex<Vec<Waker>>,
+}
+
+impl CancellationToken {
+    pub fn cancel(&self) {
+        if self.inner.cancelled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let wakers = {
+            let mut wakers = lock(&self.inner.wakers);
+            std::mem::take(&mut *wakers)
+        };
+        for waker in wakers {
+            waker.wake();
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.cancelled.load(Ordering::Acquire)
+    }
+
+    pub fn check(&self) -> Result<(), MemoError> {
+        if self.is_cancelled() {
+            Err(MemoError::cancelled())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn cancelled(&self) -> Cancelled {
+        Cancelled {
+            token: self.clone(),
+        }
+    }
+
+    fn register(&self, waker: &Waker) {
+        if self.is_cancelled() {
+            waker.wake_by_ref();
+            return;
+        }
+        let mut wakers = lock(&self.inner.wakers);
+        if !wakers.iter().any(|registered| registered.will_wake(waker)) {
+            wakers.push(waker.clone());
+        }
+    }
+}
+
+pub struct Cancelled {
+    token: CancellationToken,
+}
+
+impl Future for Cancelled {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, context: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        if self.token.is_cancelled() {
+            Poll::Ready(())
+        } else {
+            self.token.register(context.waker());
+            if self.token.is_cancelled() {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        }
+    }
+}
+
+pub struct RequestStarted<'a> {
+    pub id: u64,
+    pub method: Method,
+    pub path: &'a str,
+}
+
+pub struct RequestFinished<'a> {
+    pub id: u64,
+    pub method: Method,
+    pub path: &'a str,
+    pub status: u16,
+    pub elapsed: Duration,
+    pub disconnected: bool,
+    pub cancelled: bool,
+}
+
+pub trait RequestLifecycle: Send + Sync + 'static {
+    fn started(&self, _request: &RequestStarted<'_>) {}
+    fn finished(&self, _request: &RequestFinished<'_>) {}
+}
+
+impl<T> RequestLifecycle for Arc<T>
+where
+    T: RequestLifecycle,
+{
+    fn started(&self, request: &RequestStarted<'_>) {
+        T::started(self, request);
+    }
+
+    fn finished(&self, request: &RequestFinished<'_>) {
+        T::finished(self, request);
+    }
+}
+
+struct StateEntry {
+    value: Box<dyn Any + Send + Sync>,
+}
+
+pub struct Application {
+    routes: &'static [Route],
+    clients: &'static [ClientAsset],
+    states: HashMap<TypeId, StateEntry>,
+    lifecycle: Vec<Arc<dyn RequestLifecycle>>,
+    next_request_id: AtomicU64,
+}
+
+impl Application {
+    pub fn new(routes: &'static [Route], clients: &'static [ClientAsset]) -> Self {
+        Self {
+            routes,
+            clients,
+            states: HashMap::new(),
+            lifecycle: Vec::new(),
+            next_request_id: AtomicU64::new(1),
+        }
+    }
+
+    pub fn state<T>(&mut self, value: T) -> Result<(), StartupError>
+    where
+        T: Send + Sync + 'static,
+    {
+        let id = TypeId::of::<T>();
+        if self.states.contains_key(&id) {
+            return Err(StartupError::duplicate_state(type_name::<T>()));
+        }
+        self.states.insert(
+            id,
+            StateEntry {
+                value: Box::new(value),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn lifecycle<T>(&mut self, observer: T)
+    where
+        T: RequestLifecycle,
+    {
+        self.lifecycle.push(Arc::new(observer));
+    }
+
+    fn state_ref<T>(&self) -> Result<&T, StateError>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.states
+            .get(&TypeId::of::<T>())
+            .and_then(|entry| entry.value.downcast_ref())
+            .ok_or(StateError {
+                type_name: type_name::<T>(),
+            })
+    }
+
+    fn request_scope(&self) -> Arc<RequestScope> {
+        Arc::new(RequestScope {
+            id: self.next_request_id.fetch_add(1, Ordering::Relaxed),
+            started: Instant::now(),
+            cancellation: CancellationToken::default(),
+            memo: RequestMemo::default(),
+        })
+    }
+
+    fn notify_started(&self, id: u64, method: Method, path: &str) {
+        let request = RequestStarted { id, method, path };
+        for observer in &self.lifecycle {
+            observer.started(&request);
+        }
+    }
+
+    fn notify_finished(
+        &self,
+        scope: &RequestScope,
+        method: Method,
+        path: &str,
+        status: u16,
+        disconnected: bool,
+    ) {
+        let request = RequestFinished {
+            id: scope.id,
+            method,
+            path,
+            status,
+            elapsed: scope.started.elapsed(),
+            disconnected,
+            cancelled: scope.cancellation.is_cancelled(),
+        };
+        for observer in &self.lifecycle {
+            observer.finished(&request);
+        }
+    }
+
+    pub fn run(self) {
+        let application = Arc::new(self);
+        let arguments: Vec<String> = std::env::args().collect();
+        if arguments.get(1).map(String::as_str) == Some("--render") {
+            let target = arguments.get(2).map(String::as_str).unwrap_or("/");
+            let method = arguments
+                .get(3)
+                .and_then(|value| Method::parse(value))
+                .unwrap_or(Method::Get);
+            let (path, query) = split_target(target);
+            if let Some((route, params)) = find_route(application.routes, method, path) {
+                let request = application.request_scope();
+                application.notify_started(request.id, method, path);
+                let context = Context {
+                    method,
+                    path,
+                    query,
+                    headers: &[],
+                    body: &[],
+                    params,
+                    application: Arc::clone(&application),
+                    request: Arc::clone(&request),
+                };
+                let mut response = (route.handler)(context);
+                prepare_html(&mut response, None, false);
+                let status = response.status;
+                application.notify_finished(&request, method, path, status, false);
+                print!("{}", response.into_body_string());
+            } else {
+                std::process::exit(2);
+            }
+            return;
+        }
+
+        let port = std::env::var("PORT").unwrap_or_else(|_| "8785".to_owned());
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+            .unwrap_or_else(|error| panic!("could not bind server: {error}"));
+        println!("antixt listening on http://127.0.0.1:{port}");
+        for incoming in listener.incoming() {
+            let Ok(stream) = incoming else { continue };
+            let application = Arc::clone(&application);
+            thread::spawn(move || handle(stream, application));
+        }
+    }
+}
+
+#[derive(Default)]
+struct RequestMemo {
+    entries: Mutex<Vec<MemoEntry>>,
+}
+
+struct MemoEntry {
+    key: Box<dyn Any + Send + Sync>,
+    key_type: TypeId,
+    value_type: TypeId,
+    cell: Arc<MemoCell>,
+}
+
+impl RequestMemo {
+    fn cell<K, T>(&self, key: K) -> (Arc<MemoCell>, bool)
+    where
+        K: Eq + Send + Sync + 'static,
+        T: Send + Sync + 'static,
+    {
+        let key_type = TypeId::of::<K>();
+        let value_type = TypeId::of::<T>();
+        let mut entries = lock(&self.entries);
+        if let Some(entry) = entries.iter().find(|entry| {
+            entry.key_type == key_type
+                && entry.value_type == value_type
+                && entry.key.downcast_ref::<K>() == Some(&key)
+        }) {
+            return (Arc::clone(&entry.cell), false);
+        }
+        let cell = Arc::new(MemoCell::new());
+        entries.push(MemoEntry {
+            key: Box::new(key),
+            key_type,
+            value_type,
+            cell: Arc::clone(&cell),
+        });
+        (cell, true)
+    }
+}
+
+struct RequestScope {
+    id: u64,
+    started: Instant,
+    cancellation: CancellationToken,
+    memo: RequestMemo,
+}
+
+struct MemoCell {
+    status: Mutex<MemoStatus>,
+    ready: Condvar,
+}
+
+enum MemoStatus {
+    Computing(Vec<Waker>),
+    Ready(Arc<dyn Any + Send + Sync>),
+    Cancelled,
+}
+
+impl MemoCell {
+    fn new() -> Self {
+        Self {
+            status: Mutex::new(MemoStatus::Computing(Vec::new())),
+            ready: Condvar::new(),
+        }
+    }
+
+    fn complete<T>(&self, value: Arc<T>)
+    where
+        T: Send + Sync + 'static,
+    {
+        let wakers = {
+            let mut status = lock(&self.status);
+            let MemoStatus::Computing(wakers) =
+                std::mem::replace(&mut *status, MemoStatus::Ready(value))
+            else {
+                return;
+            };
+            wakers
+        };
+        self.ready.notify_all();
+        for waker in wakers {
+            waker.wake();
+        }
+    }
+
+    fn cancel(&self) {
+        let wakers = {
+            let mut status = lock(&self.status);
+            let MemoStatus::Computing(wakers) =
+                std::mem::replace(&mut *status, MemoStatus::Cancelled)
+            else {
+                return;
+            };
+            wakers
+        };
+        self.ready.notify_all();
+        for waker in wakers {
+            waker.wake();
+        }
+    }
+
+    fn wait_sync<T>(&self, cancellation: &CancellationToken) -> Result<Arc<T>, MemoError>
+    where
+        T: Send + Sync + 'static,
+    {
+        let mut status = lock(&self.status);
+        loop {
+            cancellation.check()?;
+            match &*status {
+                MemoStatus::Ready(value) => {
+                    return Arc::clone(value)
+                        .downcast::<T>()
+                        .map_err(|_| MemoError::type_mismatch());
+                }
+                MemoStatus::Cancelled => return Err(MemoError::cancelled()),
+                MemoStatus::Computing(_) => {
+                    let waited = self.ready.wait_timeout(status, Duration::from_millis(10));
+                    status = match waited {
+                        Ok((status, _)) => status,
+                        Err(poisoned) => poisoned.into_inner().0,
+                    };
+                }
+            }
+        }
+    }
+}
+
+struct MemoProducer {
+    cell: Arc<MemoCell>,
+    complete: bool,
+}
+
+impl Drop for MemoProducer {
+    fn drop(&mut self) {
+        if !self.complete {
+            self.cell.cancel();
+        }
+    }
+}
+
+struct MemoWait<T> {
+    cell: Arc<MemoCell>,
+    cancellation: CancellationToken,
+    marker: std::marker::PhantomData<T>,
+}
+
+impl<T> Future for MemoWait<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Output = Result<Arc<T>, MemoError>;
+
+    fn poll(self: Pin<&mut Self>, context: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        if self.cancellation.is_cancelled() {
+            return Poll::Ready(Err(MemoError::cancelled()));
+        }
+        let mut status = lock(&self.cell.status);
+        match &mut *status {
+            MemoStatus::Ready(value) => Poll::Ready(
+                Arc::clone(value)
+                    .downcast::<T>()
+                    .map_err(|_| MemoError::type_mismatch()),
+            ),
+            MemoStatus::Cancelled => Poll::Ready(Err(MemoError::cancelled())),
+            MemoStatus::Computing(wakers) => {
+                if !wakers
+                    .iter()
+                    .any(|registered| registered.will_wake(context.waker()))
+                {
+                    wakers.push(context.waker().clone());
+                }
+                self.cancellation.register(context.waker());
+                Poll::Pending
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Context<'a> {
     pub method: Method,
     pub path: &'a str,
@@ -189,6 +709,8 @@ pub struct Context<'a> {
     headers: &'a [(String, String)],
     body: &'a [u8],
     params: Vec<CapturedParam<'a>>,
+    application: Arc<Application>,
+    request: Arc<RequestScope>,
 }
 
 impl<'a> Context<'a> {
@@ -236,6 +758,79 @@ impl<'a> Context<'a> {
     pub fn is_fragment(&self) -> bool {
         self.header("antixt-fragment")
             .is_some_and(|value| value.encoded().eq_ignore_ascii_case("true"))
+    }
+
+    pub fn request_id(&self) -> u64 {
+        self.request.id
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        self.request.started.elapsed()
+    }
+
+    pub fn cancellation(&self) -> CancellationToken {
+        self.request.cancellation.clone()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.request.cancellation.is_cancelled()
+    }
+
+    pub fn state<T>(&self) -> Result<&T, StateError>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.application.state_ref::<T>()
+    }
+
+    pub fn memoize_sync<K, T, F>(&self, key: K, produce: F) -> Result<Arc<T>, MemoError>
+    where
+        K: Eq + Send + Sync + 'static,
+        T: Send + Sync + 'static,
+        F: FnOnce() -> T,
+    {
+        self.request.cancellation.check()?;
+        let (cell, producer) = self.request.memo.cell::<K, T>(key);
+        if !producer {
+            return cell.wait_sync(&self.request.cancellation);
+        }
+        let mut producer = MemoProducer {
+            cell: Arc::clone(&cell),
+            complete: false,
+        };
+        let value = Arc::new(produce());
+        self.request.cancellation.check()?;
+        cell.complete(Arc::clone(&value));
+        producer.complete = true;
+        Ok(value)
+    }
+
+    pub async fn memoize<K, T, F, Fut>(&self, key: K, produce: F) -> Result<Arc<T>, MemoError>
+    where
+        K: Eq + Send + Sync + 'static,
+        T: Send + Sync + 'static,
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = T> + Send,
+    {
+        self.request.cancellation.check()?;
+        let (cell, producer) = self.request.memo.cell::<K, T>(key);
+        if !producer {
+            return MemoWait {
+                cell,
+                cancellation: self.request.cancellation.clone(),
+                marker: std::marker::PhantomData,
+            }
+            .await;
+        }
+        let mut producer = MemoProducer {
+            cell: Arc::clone(&cell),
+            complete: false,
+        };
+        let value = Arc::new(produce().await);
+        self.request.cancellation.check()?;
+        cell.complete(Arc::clone(&value));
+        producer.complete = true;
+        Ok(value)
     }
 }
 
@@ -439,40 +1034,7 @@ impl ClientAsset {
 }
 
 pub fn run(routes: &'static [Route], clients: &'static [ClientAsset]) {
-    let arguments: Vec<String> = std::env::args().collect();
-    if arguments.get(1).map(String::as_str) == Some("--render") {
-        let target = arguments.get(2).map(String::as_str).unwrap_or("/");
-        let method = arguments
-            .get(3)
-            .and_then(|value| Method::parse(value))
-            .unwrap_or(Method::Get);
-        let (path, query) = split_target(target);
-        if let Some((route, params)) = find_route(routes, method, path) {
-            let context = Context {
-                method,
-                path,
-                query,
-                headers: &[],
-                body: &[],
-                params,
-            };
-            let mut response = (route.handler)(context);
-            prepare_html(&mut response, None, false);
-            print!("{}", response.into_body_string());
-        } else {
-            std::process::exit(2);
-        }
-        return;
-    }
-
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8785".to_owned());
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
-        .unwrap_or_else(|error| panic!("could not bind server: {error}"));
-    println!("antixt listening on http://127.0.0.1:{port}");
-    for incoming in listener.incoming() {
-        let Ok(stream) = incoming else { continue };
-        thread::spawn(move || handle(stream, routes, clients));
-    }
+    Application::new(routes, clients).run();
 }
 
 fn find_route<'a>(
@@ -592,11 +1154,11 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
     })
 }
 
-fn handle(mut stream: TcpStream, routes: &'static [Route], clients: &'static [ClientAsset]) {
+fn handle(mut stream: TcpStream, application: Arc<Application>) {
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(_) => {
-            send(
+            let _ = send(
                 &mut stream,
                 Response::full(400, "text/plain; charset=utf-8", "Bad request"),
             );
@@ -607,7 +1169,7 @@ fn handle(mut stream: TcpStream, routes: &'static [Route], clients: &'static [Cl
     let development_version = std::env::var("ANTIXT_DEV_VERSION").ok();
 
     if request.method == Some(Method::Get) && path == "/__antixt/version" {
-        send(
+        let _ = send(
             &mut stream,
             Response::text(development_version.as_deref().unwrap_or("production")),
         );
@@ -617,9 +1179,9 @@ fn handle(mut stream: TcpStream, routes: &'static [Route], clients: &'static [Cl
         && let Some(name) = path
             .strip_prefix("/__antixt/client/")
             .and_then(|path| path.strip_suffix(".js"))
-        && let Some(asset) = clients.iter().find(|asset| asset.name == name)
+        && let Some(asset) = application.clients.iter().find(|asset| asset.name == name)
     {
-        send(
+        let _ = send(
             &mut stream,
             Response::full(200, "text/javascript; charset=utf-8", asset.source),
         );
@@ -627,19 +1189,21 @@ fn handle(mut stream: TcpStream, routes: &'static [Route], clients: &'static [Cl
     }
 
     let Some(method) = request.method else {
-        send(
+        let _ = send(
             &mut stream,
             Response::full(400, "text/plain; charset=utf-8", "Bad request"),
         );
         return;
     };
-    let Some((route, params)) = find_route(routes, method, path) else {
-        send(
+    let Some((route, params)) = find_route(application.routes, method, path) else {
+        let _ = send(
             &mut stream,
             Response::full(404, "text/plain; charset=utf-8", "Not found"),
         );
         return;
     };
+    let request_scope = application.request_scope();
+    application.notify_started(request_scope.id, method, path);
     let context = Context {
         method,
         path,
@@ -647,11 +1211,18 @@ fn handle(mut stream: TcpStream, routes: &'static [Route], clients: &'static [Cl
         headers: &request.headers,
         body: &request.body,
         params,
+        application: Arc::clone(&application),
+        request: Arc::clone(&request_scope),
     };
     let fragment = context.is_fragment();
     let mut response = (route.handler)(context);
     prepare_html(&mut response, development_version.as_deref(), fragment);
-    send(&mut stream, response);
+    let status = response.status;
+    let disconnected = send(&mut stream, response).is_err();
+    if disconnected {
+        request_scope.cancellation.cancel();
+    }
+    application.notify_finished(&request_scope, method, path, status, disconnected);
 }
 
 fn prepare_html(response: &mut Response, development_version: Option<&str>, fragment: bool) {
@@ -690,7 +1261,7 @@ fn inject_before_body(document: &str, script: &str) -> String {
     }
 }
 
-fn send(stream: &mut TcpStream, mut response: Response) {
+fn send(stream: &mut TcpStream, mut response: Response) -> std::io::Result<()> {
     let reason = match response.status {
         200 => "OK",
         201 => "Created",
@@ -713,22 +1284,23 @@ fn send(stream: &mut TcpStream, mut response: Response) {
                 &mut header,
                 format_args!("Content-Length: {}\r\n\r\n", body.len()),
             );
-            let _ = stream.write_all(header.as_bytes());
-            let _ = stream.write_all(body.as_bytes());
+            stream.write_all(header.as_bytes())?;
+            stream.write_all(body.as_bytes())?;
         }
         Body::Stream(ref mut chunks) => {
             header.push_str("Transfer-Encoding: chunked\r\n\r\n");
-            let _ = stream.write_all(header.as_bytes());
+            stream.write_all(header.as_bytes())?;
             for chunk in chunks {
                 let bytes = chunk.as_bytes();
-                let _ = write!(stream, "{:x}\r\n", bytes.len());
-                let _ = stream.write_all(bytes);
-                let _ = stream.write_all(b"\r\n");
-                let _ = stream.flush();
+                write!(stream, "{:x}\r\n", bytes.len())?;
+                stream.write_all(bytes)?;
+                stream.write_all(b"\r\n")?;
+                stream.flush()?;
             }
-            let _ = stream.write_all(b"0\r\n\r\n");
+            stream.write_all(b"0\r\n\r\n")?;
         }
     }
+    Ok(())
 }
 
 fn split_target(target: &str) -> (&str, &str) {
@@ -788,11 +1360,35 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::html;
+    use std::sync::Barrier;
     use std::time::Instant;
+
+    static NO_ROUTES: &[Route] = &[];
+    static NO_CLIENTS: &[ClientAsset] = &[];
+
+    fn test_context(application: Arc<Application>) -> Context<'static> {
+        let request = application.request_scope();
+        Context {
+            method: Method::Get,
+            path: "/test",
+            query: "",
+            headers: &[],
+            body: &[],
+            params: Vec::new(),
+            application,
+            request,
+        }
+    }
 
     #[test]
     fn converts_html_into_a_response() {
@@ -828,6 +1424,8 @@ mod tests {
             ("Cookie".to_owned(), "session=abc123; theme=dark".to_owned()),
             ("X-Request-Id".to_owned(), "request-7".to_owned()),
         ];
+        let application = Arc::new(Application::new(NO_ROUTES, NO_CLIENTS));
+        let request = application.request_scope();
         let context = Context {
             method: Method::Post,
             path: "/submit",
@@ -835,6 +1433,8 @@ mod tests {
             headers: &headers,
             body: b"email=hello%40example.com",
             params: Vec::new(),
+            application,
+            request,
         };
         assert_eq!(context.query("page").unwrap().parse::<u32>().unwrap(), 3);
         assert_eq!(
@@ -886,5 +1486,150 @@ mod tests {
     fn collects_streamed_response_for_static_rendering() {
         let response = Response::stream("text/html; charset=utf-8", ["one", "two"]);
         assert_eq!(response.into_body_string(), "onetwo");
+    }
+
+    #[test]
+    fn registers_typed_state_and_reports_configuration_errors() {
+        struct SiteName(&'static str);
+        #[derive(Debug)]
+        struct Missing;
+
+        let mut application = Application::new(NO_ROUTES, NO_CLIENTS);
+        application.state(SiteName("antixt")).unwrap();
+        let duplicate = application.state(SiteName("duplicate")).unwrap_err();
+        assert!(duplicate.to_string().contains("already registered"));
+
+        let context = test_context(Arc::new(application));
+        assert_eq!(context.state::<SiteName>().unwrap().0, "antixt");
+        let missing = context.state::<Missing>().unwrap_err();
+        assert!(missing.to_string().contains(type_name::<Missing>()));
+    }
+
+    #[test]
+    fn memoizes_sync_values_once_per_request() {
+        let context = test_context(Arc::new(Application::new(NO_ROUTES, NO_CLIENTS)));
+        let calls = AtomicU64::new(0);
+        let first = context
+            .memoize_sync("navigation", || {
+                calls.fetch_add(1, Ordering::Relaxed);
+                String::from("cached")
+            })
+            .unwrap();
+        let second = context
+            .memoize_sync("navigation", || {
+                calls.fetch_add(1, Ordering::Relaxed);
+                String::from("duplicate")
+            })
+            .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(first.as_str(), "cached");
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn deduplicates_concurrent_async_memoization() {
+        let context = test_context(Arc::new(Application::new(NO_ROUTES, NO_CLIENTS)));
+        let calls = Arc::new(AtomicU64::new(0));
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let context = context.clone();
+            let calls = Arc::clone(&calls);
+            let barrier = Arc::clone(&barrier);
+            workers.push(thread::spawn(move || {
+                barrier.wait();
+                block_on(context.memoize("catalog", || async move {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    sleep(Duration::from_millis(5)).await;
+                    String::from("shared")
+                }))
+                .unwrap()
+            }));
+        }
+        barrier.wait();
+        let values: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(Arc::ptr_eq(&values[0], &values[1]));
+    }
+
+    #[test]
+    fn cancellation_wakes_waiting_futures() {
+        let token = CancellationToken::default();
+        let waiting = token.clone();
+        let worker = thread::spawn(move || block_on(waiting.cancelled()));
+        thread::sleep(Duration::from_millis(2));
+        token.cancel();
+        worker.join().unwrap();
+        assert!(token.is_cancelled());
+        assert_eq!(
+            token.check().unwrap_err().to_string(),
+            "request was cancelled"
+        );
+    }
+
+    #[test]
+    fn cancellation_releases_async_memo_waiters() {
+        let context = test_context(Arc::new(Application::new(NO_ROUTES, NO_CLIENTS)));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let producer_context = context.clone();
+        let producer = thread::spawn(move || {
+            block_on(producer_context.memoize("slow", || async move {
+                started_tx.send(()).unwrap();
+                sleep(Duration::from_millis(20)).await;
+                String::from("finished")
+            }))
+        });
+        started_rx.recv().unwrap();
+        let waiting_context = context.clone();
+        let waiter = thread::spawn(move || {
+            block_on(
+                waiting_context.memoize("slow", || async { String::from("unexpected producer") }),
+            )
+        });
+        thread::sleep(Duration::from_millis(2));
+        context.cancellation().cancel();
+        assert_eq!(
+            waiter.join().unwrap().unwrap_err().to_string(),
+            "request was cancelled"
+        );
+        assert_eq!(
+            producer.join().unwrap().unwrap_err().to_string(),
+            "request was cancelled"
+        );
+    }
+
+    #[test]
+    fn lifecycle_observers_receive_request_outcomes() {
+        #[derive(Default)]
+        struct Observer {
+            events: Mutex<Vec<String>>,
+        }
+
+        impl RequestLifecycle for Observer {
+            fn started(&self, request: &RequestStarted<'_>) {
+                lock(&self.events).push(format!("start:{}:{}", request.id, request.path));
+            }
+
+            fn finished(&self, request: &RequestFinished<'_>) {
+                lock(&self.events).push(format!(
+                    "finish:{}:{}:{}",
+                    request.id, request.status, request.disconnected
+                ));
+            }
+        }
+
+        let observer = Arc::new(Observer::default());
+        let mut application = Application::new(NO_ROUTES, NO_CLIENTS);
+        application.lifecycle(Arc::clone(&observer));
+        let scope = application.request_scope();
+        application.notify_started(scope.id, Method::Get, "/health");
+        application.notify_finished(&scope, Method::Get, "/health", 204, false);
+        assert_eq!(
+            *lock(&observer.events),
+            ["start:1:/health", "finish:1:204:false"]
+        );
     }
 }

@@ -108,7 +108,7 @@ function createFixture() {
   mkdirSync(join(app, "components"), { recursive: true });
   writeFileSync(
     join(app, "Cargo.toml"),
-    `[package]\nname = "antixt-scale"\nversion = "0.3.0"\nedition = "2024"\npublish = false\n\n[[bin]]\nname = "antixt-app"\npath = ".antixt/generated/main.rs"\n\n[dependencies]\nantixt = { path = "../../antixt" }\n\n[package.metadata.antixt]\ngenerated = true\n`,
+    `[package]\nname = "antixt-scale"\nversion = "0.4.0"\nedition = "2024"\npublish = false\n\n[[bin]]\nname = "antixt-app"\npath = ".antixt/generated/main.rs"\n\n[dependencies]\nantixt = { path = "../../antixt" }\n\n[package.metadata.antixt]\ngenerated = true\n`,
   );
   writeFileSync(join(app, "components/mod.rs"), "pub mod leaf;\n");
   writeFileSync(
@@ -170,7 +170,7 @@ try {
   const rssBytes = Number.parseInt(rss.stdout.trim(), 10) * 1024;
 
   const result = {
-    version: "0.3.0-scale",
+    version: "0.4.0-scale",
     routes: 1000,
     fixtureMs: rounded(fixtureMs),
     routeScanMs: rounded(scanMs),

@@ -142,7 +142,7 @@ run([server, "--render", "/missing"], 2);
 const renderMs = median(Array.from({ length: 7 }, () => run([server, "--render", "/"]).ms));
 const sourceFiles = rustSources(join(project, "app")).concat(rustSources(join(project, "components")));
 const result = {
-  version: "0.3.0-full-stack",
+  version: "0.4.0-full-stack",
   routes: Object.keys(pages).length,
   rustSourceFiles: sourceFiles.length,
   rustSourceBytes: sourceFiles.reduce((total, file) => total + statSync(file).size, 0),

@@ -1,6 +1,6 @@
 # antixt framework crate
 
-`antixt` v0.3 is a dependency-free Rust library and CLI for pure-Rust
+`antixt` v0.4 is a dependency-free Rust library and CLI for pure-Rust
 web applications.
 
 ## Installation
@@ -27,6 +27,7 @@ buildable outside the antixt repository.
 - `[slug]`: generated route-specific `Params { slug: Value<'a> }`.
 - `[...path]`: final catch-all parameter.
 - `client/**/*.js`: compile-time embedded optional island modules.
+- `app/config.rs`: optional typed state and lifecycle configuration.
 
 antixt scans names, never Rust syntax. It generates deterministic module imports,
 typed wrappers, route patterns, and embedded client assets under
@@ -37,13 +38,13 @@ contract. Only `.antixt/target/` is ignored.
 
 - `html.rs`: escaped HTML tree, enhancement markers, and `view!` macro.
 - `css.rs`: typed atomic utilities, semantic tokens, states, and breakpoints.
-- `server.rs`: route matching, typed requests, responses, redirects, async
-  future execution, chunked streams, concurrent serving, fragments, and islands.
+- `server.rs`: route matching, typed state, request memoization, cancellation,
+  lifecycle observers, responses, async execution, streams, and HTTP serving.
 - `project.rs`: route/client discovery, parameter validation, and specificity.
 - `codegen.rs`: generated Rust module wiring and typed handler wrappers.
 - `tooling.rs`: change-aware generation plus Cargo check/build orchestration.
 - `dev.rs`: Rust/JavaScript fingerprinting, incremental build, and child reload.
-- `main.rs`: lifecycle CLI and v0.3 scaffold.
+- `main.rs`: lifecycle CLI and v0.4 scaffold.
 
 ## Commands
 

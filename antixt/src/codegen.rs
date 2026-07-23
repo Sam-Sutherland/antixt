@@ -5,9 +5,12 @@ use std::path::{Path, PathBuf};
 
 pub fn rust_app(project: &Project) -> Result<String, String> {
     let mut output = String::from(
-        "use antixt::{ClientAsset, Context, IntoResponse, Method, Response, Route};\n",
+        "use antixt::{Application, ClientAsset, Context, IntoResponse, Method, Response, Route};\n",
     );
     let mut modules = BTreeMap::<PathBuf, String>::new();
+    if let Some(config) = &project.config {
+        module_name(&mut modules, config);
+    }
     for route in &project.routes {
         module_name(&mut modules, &route.source);
         for layout in &route.layouts {
@@ -49,19 +52,32 @@ pub fn rust_app(project: &Project) -> Result<String, String> {
             }
             output.push_str("    };\n");
         }
-        let arguments = if route.params.is_empty() {
-            "context".to_owned()
+        let context_argument = if route.function == "page" && !route.layouts.is_empty() {
+            "context.clone()"
         } else {
-            "context, params".to_owned()
+            "context"
+        };
+        let arguments = if route.params.is_empty() {
+            context_argument.to_owned()
+        } else {
+            format!("{context_argument}, params")
         };
         if route.function == "page" {
             let _ = writeln!(
                 output,
                 "    let page = {route_module}::{function}({arguments});"
             );
-            for layout in &route.layouts {
+            for (layout_index, layout) in route.layouts.iter().enumerate() {
                 let layout_module = &modules[layout];
-                let _ = writeln!(output, "    let page = {layout_module}::layout(page);");
+                let layout_context = if layout_index + 1 == route.layouts.len() {
+                    "context"
+                } else {
+                    "context.clone()"
+                };
+                let _ = writeln!(
+                    output,
+                    "    let page = {layout_module}::layout({layout_context}, page);"
+                );
             }
             output.push_str("    page.into_response()\n");
         } else {
@@ -102,7 +118,17 @@ pub fn rust_app(project: &Project) -> Result<String, String> {
         }
         output.push_str("];\n");
     }
-    output.push_str("fn main() {\n    antixt::server::run(ROUTES, CLIENT_ASSETS);\n}\n");
+    output.push_str(
+        "fn main() {\n    let mut application = Application::new(ROUTES, CLIENT_ASSETS);\n",
+    );
+    if let Some(config) = &project.config {
+        let config_module = &modules[config];
+        let _ = writeln!(
+            output,
+            "    if let Err(error) = {config_module}::configure(&mut application) {{\n        eprintln!(\"antixt: {{error}}\");\n        std::process::exit(1);\n    }}"
+        );
+    }
+    output.push_str("    application.run();\n}\n");
     Ok(output)
 }
 
@@ -151,6 +177,7 @@ mod tests {
         fs::write(&page, "").unwrap();
         let project = Project {
             directory: root.clone(),
+            config: None,
             components: None,
             routes: vec![RouteSource {
                 method: Method::Get,
@@ -182,6 +209,7 @@ mod tests {
         fs::write(&page, "").unwrap();
         let project = Project {
             directory: root.clone(),
+            config: None,
             components: None,
             routes: vec![RouteSource {
                 method: Method::Get,
@@ -199,6 +227,44 @@ mod tests {
         let generated = rust_app(&project).unwrap();
         assert!(generated.contains("antixt_module_0::Params"));
         assert!(generated.contains("slug: context.param(\"slug\")"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn wires_optional_application_configuration() {
+        let root = std::env::temp_dir().join(format!(
+            "antixt-config-codegen-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let config = root.join("config.rs");
+        let layout = root.join("layout.rs");
+        let page = root.join("page.rs");
+        fs::write(&config, "").unwrap();
+        fs::write(&layout, "").unwrap();
+        fs::write(&page, "").unwrap();
+        let project = Project {
+            directory: root.clone(),
+            config: Some(config),
+            components: None,
+            routes: vec![RouteSource {
+                method: Method::Get,
+                path: "/".to_owned(),
+                source: page,
+                layouts: vec![layout],
+                function: "page",
+                params: Vec::new(),
+            }],
+            clients: Vec::new(),
+        };
+        let generated = rust_app(&project).unwrap();
+        assert!(generated.contains("::configure(&mut application)"));
+        assert!(generated.contains("::page(context.clone())"));
+        assert!(generated.contains("::layout(context, page)"));
+        assert!(generated.contains("application.run()"));
         fs::remove_dir_all(root).unwrap();
     }
 }

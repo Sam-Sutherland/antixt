@@ -50,7 +50,7 @@ pub fn page(_context: Context<'_>) -> Html {
             "Project status",
             html::fragment()
                 .child(html::p().text(
-                    "v0.3 proves the major framework boundaries: routing, requests, responses, async work, streaming, HTML composition, development reload, fragments, islands, and native builds.",
+                    "v0.4 proves the major framework boundaries: routing, typed state, request caching, lifecycle hooks, responses, async work, streaming, HTML composition, development reload, fragments, islands, and native builds.",
                 ))
                 .child(callout(
                     "warning",

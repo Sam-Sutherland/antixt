@@ -2,7 +2,9 @@
 
 > The Rust web framework after Next.
 
-antixt v0.3 is a dependency-free, server-first Rust web framework. Applications
+[![CI](https://github.com/Sam-Sutherland/antixt/actions/workflows/ci.yml/badge.svg)](https://github.com/Sam-Sutherland/antixt/actions/workflows/ci.yml)
+
+antixt v0.4 is a dependency-free, server-first Rust web framework. Applications
 are ordinary Rust, routes follow Next.js-style filesystem conventions, and
 production pages ship no JavaScript unless they opt into fragments or islands.
 
@@ -123,11 +125,54 @@ pub fn get(_context: Context<'_>) -> AsyncResponse<'_> {
 }
 ```
 
+## Typed state and request caching
+
+`app/config.rs` configures shared services once at startup. Duplicate
+registrations return a `StartupError`; missing services return a `StateError`
+from the request context instead of panicking inside the framework.
+
+```rust
+pub fn configure(app: &mut Application) -> Result<(), StartupError> {
+    app.state(Database::connect())?;
+    app.lifecycle(RequestMetrics::default());
+    Ok(())
+}
+```
+
+Pages, components, and layouts share one request scope. `memoize_sync` supports
+normal server rendering, while `memoize` deduplicates concurrent futures with
+the same typed key and value. Both return an `Arc<T>` and observe cancellation.
+
+```rust
+let catalog = context
+    .state::<Catalog>()
+    .expect("Catalog is configured");
+let products = context
+    .memoize("featured", || catalog.featured())
+    .await
+    .expect("request is active");
+```
+
+`Context` also exposes a request ID, elapsed time, and cancellation token.
+Lifecycle observers receive typed start and finish events including status,
+latency, cancellation, and client-disconnect state.
+
+### Upgrading layouts from v0.3
+
+Layouts now receive the shared request context before their children:
+
+```rust
+pub fn layout(context: Context<'_>, children: Html) -> Html {
+    // Pages and layouts can now reuse the same state and memoized values.
+    view! { body { (children) } }
+}
+```
+
 ## Optional browser enhancement
 
 `.fragment_form()`, `.fragment_get()`, and `.fragment_post()` request HTML
 fragments and swap a selected target. `.island("counter")` mounts an embedded
-`client/counter.js` module. antixt injects its 2.4 KB inline runtime only when an
+`client/counter.js` module. antixt injects its 2.9 KB inline runtime only when an
 HTML document contains an enhancement marker; ordinary pages remain zero-JS.
 
 The canonical browser test verified a fragment form update, a stateful counter
@@ -135,21 +180,21 @@ island, and a dynamic route. No external client library or bundler is involved.
 
 ## Measured performance
 
-The local seven-route fixture measured an 861 ms cold release build, 37 ms
-no-change build, 231 ms application edit build, and 1.76 ms render-process
+The local seven-route fixture measured a 1,155 ms cold release build, 40 ms
+no-change build, 267 ms application edit build, and 1.67 ms render-process
 startup. The disposable 1,000-route fixture measured:
 
 | Measurement | Result |
 |---|---:|
-| Route scan | 136.66 ms |
-| Cold check | 448 ms |
-| Warm check | 61 ms |
-| Cold release build | 1,968 ms |
-| No-change build | 62 ms |
-| Shared leaf edit | 1,048 ms |
-| Throughput, concurrency 50 | 17,320 req/s |
-| HTTP p50 / p95 / p99 | 2.40 / 4.41 / 8.90 ms |
-| Resident memory after load | 2.85 MB |
+| Route scan | 273.73 ms |
+| Cold check | 456 ms |
+| Warm check | 60 ms |
+| Cold release build | 1,628 ms |
+| No-change build | 60 ms |
+| Shared leaf edit | 973 ms |
+| Throughput, concurrency 50 | 16,452 req/s |
+| HTTP p50 / p95 / p99 | 2.14 / 6.76 / 13.02 ms |
+| Resident memory after load | 2.80 MB |
 
 These are local synthetic measurements of a deliberately small HTTP stack, not
 production capacity claims. See [RESEARCH.md](RESEARCH.md) for methodology and
@@ -158,9 +203,13 @@ limitations.
 ## Current boundary
 
 antixt now proves all major framework seams, but its HTTP implementation remains
-experimental. Before production use it needs bounded concurrency, cancellation,
-TLS/proxy hardening, multipart forms, middleware, caching, observability,
-dependency-directed HMR, and broader protocol/security testing.
+experimental. Before production use it needs bounded concurrency,
+transport-level cancellation, TLS/proxy hardening, multipart forms, middleware,
+cross-request caching, production observability adapters, dependency-directed
+HMR, and broader protocol/security testing. The current cancellation token is
+cooperative; the standard-library transport only detects a disconnect when a
+response write fails.
+
 The typed CSS spike additionally needs app-defined themes, conflict diagnostics,
 container queries, stylesheet caching, and production extraction.
 
@@ -171,3 +220,7 @@ node benchmark/antixt-rust.mjs
 node benchmark/antixt-scale.mjs
 antixt dev docs --port 4174
 ```
+
+## License
+
+antixt is available under the [MIT License](LICENSE).

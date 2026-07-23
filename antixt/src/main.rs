@@ -4,8 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const ROOT_LAYOUT: &str = r###"use antixt::css::u;
-use antixt::{Html, view};
+const ROOT_LAYOUT: &str = r###"use crate::components::state::SiteMetadata;
+use antixt::css::u;
+use antixt::{Context, Html, view};
 
 const STYLES: &str = r#"
 :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -16,13 +17,17 @@ article { margin: 3rem 0; padding: 1.5rem; border: 1px solid color-mix(in srgb, 
 button { padding: .75rem 1rem; font: inherit; font-weight: 700; cursor: pointer; }
 "#;
 
-pub fn layout(children: Html) -> Html {
+pub fn layout(context: Context<'_>, children: Html) -> Html {
+    let site = context.state::<SiteMetadata>().expect("SiteMetadata is configured");
+    let title = context
+        .memoize_sync("site-title", || site.name.to_owned())
+        .expect("request is active");
     view! {
         document [lang = "en"] {
             head {
                 meta [charset = "utf-8"] {}
                 meta [name = "viewport", content = "width=device-width, initial-scale=1"] {}
-                title { "antixt" }
+                title { (title.as_str()) }
                 style { (STYLES) }
             }
             body {
@@ -38,15 +43,19 @@ pub fn layout(children: Html) -> Html {
 "###;
 
 const HOME_PAGE: &str = r##"use crate::components::feature::{FeatureProps, feature};
+use crate::components::state::SiteMetadata;
 use antixt::css::u;
 use antixt::{Context, Html, html, view};
 
-pub fn page(_context: Context<'_>) -> Html {
-    let heading = "Hello from antixt";
-    let tagline = "Fast < simple & safe";
+pub fn page(context: Context<'_>) -> Html {
+    let site = context.state::<SiteMetadata>().expect("SiteMetadata is configured");
+    let heading = context
+        .memoize_sync("site-title", || site.name.to_owned())
+        .expect("request is active");
+    let tagline = site.tagline;
     view! {
         main [styles = [u::GRID, u::GAP_4]] {
-            h1 { (heading) }
+            h1 { (heading.as_str()) }
             p { (tagline) }
             (feature(FeatureProps {
                 title: "Native Rust",
@@ -69,10 +78,21 @@ pub fn page(_context: Context<'_>) -> Html {
 "##;
 
 const ABOUT_LAYOUT: &str = r#"use antixt::css::u;
-use antixt::{Html, view};
+use antixt::{Context, Html, view};
 
-pub fn layout(children: Html) -> Html {
+pub fn layout(_context: Context<'_>, children: Html) -> Html {
     view! { section [id = "about-shell", styles = [u::PY_8]] { (children) } }
+}
+"#;
+
+const APP_CONFIG: &str = r#"use crate::components::state::SiteMetadata;
+use antixt::{Application, StartupError};
+
+pub fn configure(application: &mut Application) -> Result<(), StartupError> {
+    application.state(SiteMetadata {
+        name: "Hello from antixt",
+        tagline: "Fast < simple & safe",
+    })
 }
 "#;
 
@@ -155,7 +175,13 @@ const EMBEDDED_FRAMEWORK_SOURCES: &[(&str, &str)] = &[
     ("tooling.rs", include_str!("tooling.rs")),
 ];
 
-const COMPONENTS_MOD: &str = "pub mod feature;\n";
+const COMPONENTS_MOD: &str = "pub mod feature;\npub mod state;\n";
+
+const STATE_COMPONENT: &str = r#"pub struct SiteMetadata {
+    pub name: &'static str,
+    pub tagline: &'static str,
+}
+"#;
 
 const FEATURE_COMPONENT: &str = r#"use antixt::{Html, view};
 
@@ -258,6 +284,7 @@ fn create(arguments: &[String]) -> Result<(), String> {
     }
 
     write(&app.join("app/layout.rs"), ROOT_LAYOUT)?;
+    write(&app.join("app/config.rs"), APP_CONFIG)?;
     write(&app.join("app/page.rs"), HOME_PAGE)?;
     write(&app.join("app/about/layout.rs"), ABOUT_LAYOUT)?;
     write(&app.join("app/about/page.rs"), ABOUT_PAGE)?;
@@ -266,6 +293,7 @@ fn create(arguments: &[String]) -> Result<(), String> {
     write(&app.join("app/api/status/get.rs"), ASYNC_STATUS)?;
     write(&app.join("components/mod.rs"), COMPONENTS_MOD)?;
     write(&app.join("components/feature.rs"), FEATURE_COMPONENT)?;
+    write(&app.join("components/state.rs"), STATE_COMPONENT)?;
     write(&app.join("client/counter.js"), CLIENT_COUNTER)?;
     write(
         &app.join(".antixt/framework/Cargo.toml"),
@@ -277,7 +305,7 @@ fn create(arguments: &[String]) -> Result<(), String> {
     write(
         &app.join("Cargo.toml"),
         &format!(
-            "[package]\nname = \"{name}\"\nversion = \"0.3.0\"\nedition = \"2024\"\npublish = false\n\n[[bin]]\nname = \"antixt-app\"\npath = \".antixt/generated/main.rs\"\n\n[dependencies]\nantixt = {{ path = \".antixt/framework\" }}\n\n[package.metadata.antixt]\ngenerated = true\n"
+            "[package]\nname = \"{name}\"\nversion = \"0.4.0\"\nedition = \"2024\"\npublish = false\n\n[[bin]]\nname = \"antixt-app\"\npath = \".antixt/generated/main.rs\"\n\n[dependencies]\nantixt = {{ path = \".antixt/framework\" }}\n\n[package.metadata.antixt]\ngenerated = true\n"
         ),
     )?;
     write(&app.join(".gitignore"), "/.antixt/target/\n")?;

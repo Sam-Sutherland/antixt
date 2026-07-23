@@ -13,6 +13,7 @@ pub fn page(_context: Context<'_>, params: Params<'_>) -> Html {
         "quick-start" => quick_start(),
         "routing" => routing(),
         "requests" => requests(),
+        "state-caching" => state_caching(),
         "async-streaming" => async_streaming(),
         "html-components" => html_components(),
         "typed-css" => typed_css(),
@@ -156,7 +157,7 @@ fn requests() -> Html {
                 .child(callout(
                     "warning",
                     "Current boundary",
-                    "v0.3 handles application/x-www-form-urlencoded bodies. Multipart uploads and configurable request size policies are next-stage work.",
+                    "v0.4 handles application/x-www-form-urlencoded bodies. Multipart uploads and configurable request size policies are next-stage work.",
                 )),
         ))
         .child(section(
@@ -176,6 +177,66 @@ fn requests() -> Html {
         "Server primitives",
         "Requests & responses",
         "Decode untrusted input explicitly, parse it into Rust types, and construct predictable responses.",
+        content,
+    )
+}
+
+fn state_caching() -> Html {
+    let content = html::fragment()
+        .child(section(
+            "configuration",
+            "Typed application state",
+            html::fragment()
+                .child(html::p().text(
+                    "An optional app/config.rs module registers long-lived services before the server accepts requests. Values are indexed by their Rust TypeId, so retrieval needs no string keys or global mutable singleton.",
+                ))
+                .child(code_block(
+                    "app/config.rs",
+                    "use antixt::{Application, StartupError};\n\npub fn configure(app: &mut Application)\n    -> Result<(), StartupError>\n{\n    app.state(Database::connect())?;\n    app.lifecycle(RequestMetrics::default());\n    Ok(())\n}",
+                ))
+                .child(callout(
+                    "info",
+                    "Configuration errors stay explicit",
+                    "Registering the same Rust type twice returns StartupError. Context::state returns StateError when a service is absent, keeping framework configuration failures inspectable instead of hiding them behind a panic.",
+                )),
+        ))
+        .child(section(
+            "memoization",
+            "One cache per request",
+            html::fragment()
+                .child(html::p().text(
+                    "Pages and ancestor layouts receive clones of the same Context and therefore share state, cancellation, timing, and memoized values. The cache is discarded when that request finishes; it never leaks user-specific data into another request.",
+                ))
+                .child(code_block(
+                    "Shared data load",
+                    "let catalog = context\n    .state::<Catalog>()\n    .expect(\"Catalog is configured\");\n\nlet products = context\n    .memoize_sync(\"featured\", || catalog.featured())\n    .expect(\"request is active\");\n\n// Async callers use the same typed cache and concurrent work is deduplicated.\nlet user = context\n    .memoize((\"user\", id), || database.user(id))\n    .await\n    .expect(\"request is active\");",
+                ))
+                .child(html::p().text(
+                    "Cache identity includes both the key type and value type. Results are returned as Arc<T>, allowing pages, layouts, and concurrent futures to reuse the same allocation.",
+                )),
+        ))
+        .child(section(
+            "lifecycle",
+            "Lifecycle and cancellation",
+            html::fragment()
+                .child(html::p().text(
+                    "Context exposes request_id, elapsed, cancellation, and is_cancelled. RequestLifecycle observers receive start and finish events with method, path, status, elapsed time, cancellation, and client-disconnect state.",
+                ))
+                .child(code_block(
+                    "Cooperative cancellation",
+                    "let cancellation = context.cancellation();\n\nif cancellation.is_cancelled() {\n    return Response::text(\"cancelled\")\n        .with_status(499);\n}\n\ncancellation.cancelled().await;",
+                ))
+                .child(callout(
+                    "warning",
+                    "Cooperative today",
+                    "The dependency-free server reports write-side disconnects and wakes memo waiters, but it cannot pre-empt arbitrary blocking Rust work. Handlers and data clients must observe the token; a future production backend can connect it to transport-level cancellation.",
+                )),
+        ));
+    docs_page(
+        "state-caching",
+        "Request-scoped data",
+        "State & caching",
+        "Register services once, deduplicate repeated work within a request, and observe request lifecycle without global state.",
         content,
     )
 }
@@ -402,7 +463,9 @@ fn architecture() -> Html {
                 .child(html::li().text("codegen.rs — typed wrappers and route tables"))
                 .child(html::li().text("html.rs — node tree, escaping, and view!"))
                 .child(html::li().text("css.rs — typed tokens and atomic utility rules"))
-                .child(html::li().text("server.rs — requests, futures, streams, and HTTP"))
+                .child(html::li().text(
+                    "server.rs — typed state, request scopes, futures, streams, and HTTP",
+                ))
                 .child(html::li().text("dev.rs — source fingerprints and reload supervision"))
                 .child(html::li().text("tooling.rs — generated source and Cargo orchestration")),
         ))
@@ -434,7 +497,7 @@ fn not_found(slug: &str) -> Html {
         "Guide not found",
         html::fragment()
             .child(html::p().text(format!(
-                "There is no documentation guide named `{slug}` in antixt v0.3.",
+                "There is no documentation guide named `{slug}` in antixt v0.4.",
             )))
             .child(
                 html::a()

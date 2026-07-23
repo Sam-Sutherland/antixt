@@ -12,6 +12,7 @@ const NAVIGATION: &[(&str, &str, &str)] = &[
         "/docs/async-streaming",
         "Async & streaming",
     ),
+    ("state-caching", "/docs/state-caching", "State & caching"),
     (
         "html-components",
         "/docs/html-components",
@@ -179,7 +180,7 @@ fn sidebar(active: &str) -> Html {
                 u::BG_PANEL,
                 css::at(Breakpoint::Large, u::BLOCK),
             ]] {
-                strong [styles = [u::TEXT_ACCENT, theme::TEXT_08]] { "v0.3 experimental" }
+                strong [styles = [u::TEXT_ACCENT, theme::TEXT_08]] { "v0.4 experimental" }
                 p [styles = [u::MT_1, u::MB_0, u::TEXT_MUTED, theme::TEXT_078]] {
                     "A real framework, still a research runtime."
                 }

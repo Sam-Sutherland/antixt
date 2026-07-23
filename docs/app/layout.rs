@@ -1,6 +1,7 @@
+use crate::components::state::SiteMetadata;
 use crate::components::theme;
 use antixt::css::{self, Breakpoint, u};
-use antixt::{Html, view};
+use antixt::{Context, Html, view};
 
 const STYLES: &str = r###"
 :root {
@@ -35,7 +36,13 @@ code, pre, kbd { font-family: var(--font-mono); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 "###;
 
-pub fn layout(children: Html) -> Html {
+pub fn layout(context: Context<'_>, children: Html) -> Html {
+    let site = context
+        .state::<SiteMetadata>()
+        .expect("SiteMetadata is configured");
+    let version = context
+        .memoize_sync("docs-version", || site.version.to_owned())
+        .expect("request is active");
     view! {
         document [lang = "en"] {
             head {
@@ -115,7 +122,7 @@ pub fn layout(children: Html) -> Html {
                         nav [aria_label = "Primary", styles = [u::FLEX, u::ITEMS_CENTER, u::GAP_1]] {
                             (nav_link("/docs", "Docs", false))
                             (nav_link("/benchmarks", "Benchmarks", false))
-                            (nav_link("/docs/architecture", "v0.3", true))
+                            (nav_link("/docs/architecture", version.as_str(), true))
                         }
                     }
                 }
@@ -133,7 +140,7 @@ pub fn layout(children: Html) -> Html {
                         theme::TEXT_08,
                         css::at(Breakpoint::Small, u::FLEX_ROW),
                     ]] {
-                        span { "antixt v0.3 — ordinary Rust, native output." }
+                        span { (format!("{} {} — ordinary Rust, native output.", site.name, version)) }
                         span { "Experimental by design." }
                     }
                 }

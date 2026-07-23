@@ -21,6 +21,8 @@ pub fn scan(project_directory: &Path) -> Result<Project, String> {
 
     let components = project_directory.join("components/mod.rs");
     let components = components.is_file().then_some(components);
+    let config = app_directory.join("config.rs");
+    let config = config.is_file().then_some(config);
     let mut routes = Vec::new();
     for file in read_tree(&app_directory)? {
         let route_kind = match file.file_name().and_then(|name| name.to_str()) {
@@ -91,6 +93,7 @@ pub fn scan(project_directory: &Path) -> Result<Project, String> {
     let clients = scan_clients(project_directory)?;
     Ok(Project {
         directory: project_directory.to_path_buf(),
+        config,
         components,
         routes,
         clients,
@@ -278,6 +281,7 @@ mod tests {
         fs::write(root.join("app/about/page.rs"), "").unwrap();
         fs::write(root.join("app/newsletter/post.rs"), "").unwrap();
         let project = scan(&root).unwrap();
+        assert!(project.config.is_none());
         assert_eq!(project.routes[0].path, "/about");
         assert_eq!(project.routes[1].method, Method::Post);
         fs::remove_dir_all(root).unwrap();
@@ -314,6 +318,28 @@ mod tests {
             .find(|route| route.path == "/docs/*path")
             .unwrap();
         assert!(docs.params[0].catch_all);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovers_optional_application_configuration() {
+        let root = std::env::temp_dir().join(format!(
+            "antixt-config-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("app")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname='test'\nversion='0.1.0'",
+        )
+        .unwrap();
+        fs::write(root.join("app/page.rs"), "").unwrap();
+        fs::write(root.join("app/config.rs"), "").unwrap();
+        let project = scan(&root).unwrap();
+        assert_eq!(project.config, Some(root.join("app/config.rs")));
         fs::remove_dir_all(root).unwrap();
     }
 }

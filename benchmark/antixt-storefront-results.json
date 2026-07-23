@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-07-23T00:36:57.325Z",
+  "result": {
+    "version": "0.4.0-storefront",
+    "routes": 3,
+    "products": 12,
+    "checkMs": 383,
+    "firstBuildMs": 899,
+    "noChangeBuildMs": 37,
+    "renderMs": 1.6,
+    "outputBytes": 2846,
+    "serverBytes": 622416,
+    "zeroJavascript": true,
+    "requests": 2000,
+    "concurrency": 50,
+    "requestsPerSecond": 16959.85,
+    "p50Ms": 2.66,
+    "p95Ms": 4.43,
+    "p99Ms": 5.7
+  }
+}
