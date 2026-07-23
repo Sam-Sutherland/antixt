@@ -1,0 +1,1 @@
+Zero dependencies, Zero Javascript first Rust based framework

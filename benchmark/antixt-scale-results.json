@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-07-22T23:56:53.687Z",
+  "result": {
+    "version": "0.3.0-scale",
+    "routes": 1000,
+    "fixtureMs": 91.31,
+    "routeScanMs": 136.66,
+    "coldCheckMs": 448,
+    "warmCheckMs": 61,
+    "coldBuildMs": 1968,
+    "noChangeBuildMs": 62,
+    "sharedLeafEditBuildMs": 1048,
+    "serverStartupMs": 177.2,
+    "serverBytes": 1215984,
+    "generatedSourceBytes": 245809,
+    "rssBytes": 2850816,
+    "requests": 2000,
+    "concurrency": 50,
+    "requestsPerSecond": 17319.68,
+    "p50Ms": 2.4,
+    "p95Ms": 4.41,
+    "p99Ms": 8.9,
+    "outputSha256": "9eb8be15e9b706a842850750d856bf456442947ffc3267998d62f5a26dfed8ce"
+  }
+}

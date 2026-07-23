@@ -1,0 +1,32 @@
+{
+  "generatedAt": "2026-07-22T00:09:39.164Z",
+  "result": {
+    "version": "0.2.0-rust-authoring",
+    "routes": 3,
+    "rustSourceFiles": 7,
+    "rustSourceBytes": 3012,
+    "cliBuildMs": 828,
+    "cliStartupMs": 1.7,
+    "routeScanMs": 1.62,
+    "coldCheckMs": 166,
+    "warmCheckMs": 50.28,
+    "coldBuildMs": 478,
+    "rebuildMs": 145,
+    "incrementalBuildMs": 146,
+    "renderMs": 1.72,
+    "cliBytes": 628080,
+    "serverBytes": 467792,
+    "generatedSourceBytes": 1093,
+    "clientJavaScriptBytes": 0,
+    "outputSha256": "e4d55c4c3458074dd6286b09b0b545f3bed97997fdb6c456a0645c2780a75033"
+  },
+  "comparison": {
+    "previousVersion": "0.1.0",
+    "previousBuildMs": 155,
+    "previousRebuildMs": 154,
+    "previousRenderMs": 2.38,
+    "buildDeltaMs": 323,
+    "rebuildDeltaMs": -9,
+    "renderDeltaMs": -0.66
+  }
+}

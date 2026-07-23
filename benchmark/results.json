@@ -1,0 +1,56 @@
+{
+  "generatedAt": "2026-07-21T23:15:02.177Z",
+  "antixtCompilerBuildMs": 59,
+  "results": [
+    {
+      "language": "typescript",
+      "typecheckMs": 191.75,
+      "coldBuildMs": 195,
+      "rebuildMs": 192,
+      "renderMs": 56.95,
+      "artifactBytes": 501,
+      "pageBytes": 3259,
+      "pageSha256": "54a6c1c6468069b31dfe90a1fc288e4dd2901fecf14fc6c717064d75de2ae9cc"
+    },
+    {
+      "language": "rust",
+      "typecheckMs": "n/a",
+      "coldBuildMs": 232,
+      "rebuildMs": 228,
+      "renderMs": 3.63,
+      "artifactBytes": 468344,
+      "pageBytes": 3259,
+      "pageSha256": "54a6c1c6468069b31dfe90a1fc288e4dd2901fecf14fc6c717064d75de2ae9cc"
+    },
+    {
+      "language": "go",
+      "typecheckMs": "n/a",
+      "coldBuildMs": 124,
+      "rebuildMs": 95,
+      "renderMs": 6.22,
+      "artifactBytes": 7691202,
+      "pageBytes": 3259,
+      "pageSha256": "54a6c1c6468069b31dfe90a1fc288e4dd2901fecf14fc6c717064d75de2ae9cc"
+    },
+    {
+      "language": "antixt-c",
+      "typecheckMs": 4.76,
+      "coldBuildMs": 51,
+      "rebuildMs": 50,
+      "renderMs": 1.95,
+      "artifactBytes": 34288,
+      "pageBytes": 3259,
+      "pageSha256": "54a6c1c6468069b31dfe90a1fc288e4dd2901fecf14fc6c717064d75de2ae9cc"
+    },
+    {
+      "language": "antixt-rust",
+      "typecheckMs": 1.65,
+      "coldBuildMs": 232,
+      "rebuildMs": 247,
+      "renderMs": 3.04,
+      "artifactBytes": 485440,
+      "pageBytes": 3259,
+      "pageSha256": "54a6c1c6468069b31dfe90a1fc288e4dd2901fecf14fc6c717064d75de2ae9cc"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+[package]
+name = "antixt"
+version = "0.3.0"
+edition = "2024"
+license = "MIT"
+description = "The dependency-free, server-first Rust web framework after Next"
+
+[lib]
+name = "antixt"
+path = "src/lib.rs"
+
+[[bin]]
+name = "antixt"
+path = "src/main.rs"
+
+[dependencies]

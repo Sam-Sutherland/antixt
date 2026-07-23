@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-07-21T23:44:41.914Z",
+  "result": {
+    "version": "0.1.0",
+    "routes": 3,
+    "cliBuildMs": 850,
+    "cliStartupMs": 4.22,
+    "checkMs": 2.27,
+    "coldBuildMs": 155,
+    "rebuildMs": 154,
+    "renderMs": 2.38,
+    "cliBytes": 677360,
+    "serverBytes": 487480,
+    "generatedSourceBytes": 10125,
+    "clientJavaScriptBytes": 0,
+    "outputSha256": "eeb0a24dd902d9f5fdcf24cf33aaa3137a23e60ade14b5e9fa10b2986daa393d"
+  }
+}

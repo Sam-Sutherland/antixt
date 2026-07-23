@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-07-21T23:17:21.999Z",
+  "benchmark": "Next-style static file routing with layouts, typed components, escaped values, and an action",
+  "compilerBuildMs": 61,
+  "results": [
+    {
+      "backend": "antixt-c",
+      "routes": 3,
+      "projectCompileMs": 50.83,
+      "routeCheckMs": 1.74,
+      "coldBuildMs": 101,
+      "rebuildMs": 103,
+      "renderMs": 1.56,
+      "artifactBytes": 34376,
+      "clientJavaScriptBytes": 0,
+      "outputSha256": "69cb59271c6c60ddd7088a5556ad7447a1c7748be2d7ccd971b3c3cd1f8c9bdd"
+    },
+    {
+      "backend": "antixt-rust",
+      "routes": 3,
+      "projectCompileMs": 47.94,
+      "routeCheckMs": 1.28,
+      "coldBuildMs": 265,
+      "rebuildMs": 303,
+      "renderMs": 2.09,
+      "artifactBytes": 468936,
+      "clientJavaScriptBytes": 0,
+      "outputSha256": "69cb59271c6c60ddd7088a5556ad7447a1c7748be2d7ccd971b3c3cd1f8c9bdd"
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "generatedAt": "2026-07-21T22:55:27.605Z",
+  "workload": {
+    "files": 1200,
+    "graphNodes": 10000,
+    "graphEdges": 24000,
+    "samplesPerOperation": 7
+  },
+  "results": [
+    {
+      "language": "go",
+      "buildMs": 243,
+      "artifactBytes": 2583170,
+      "measurements": {
+        "startup": {
+          "medianMs": 2.15,
+          "result": 1
+        },
+        "scan": {
+          "medianMs": 21.49,
+          "result": 9952672569655435000
+        },
+        "parallel": {
+          "medianMs": 12.85,
+          "result": 9952672569655435000
+        },
+        "graph": {
+          "medianMs": 5.23,
+          "result": 9998
+        },
+        "incremental": {
+          "medianMs": 10.91,
+          "result": 667148
+        },
+        "ssr": {
+          "medianMs": 12.49,
+          "result": 7162719082490687000
+        },
+        "refresh": {
+          "medianMs": 16.17,
+          "result": 5906687639445546000
+        }
+      }
+    },
+    {
+      "language": "rust",
+      "buildMs": 1059,
+      "artifactBytes": 537680,
+      "measurements": {
+        "startup": {
+          "medianMs": 2.15,
+          "result": 1
+        },
+        "scan": {
+          "medianMs": 20.09,
+          "result": 9952672569655435000
+        },
+        "parallel": {
+          "medianMs": 12.4,
+          "result": 9952672569655435000
+        },
+        "graph": {
+          "medianMs": 2.98,
+          "result": 9998
+        },
+        "incremental": {
+          "medianMs": 4.97,
+          "result": 667148
+        },
+        "ssr": {
+          "medianMs": 9.14,
+          "result": 7162719082490687000
+        },
+        "refresh": {
+          "medianMs": 10.02,
+          "result": 5906687639445546000
+        }
+      }
+    },
+    {
+      "language": "c",
+      "buildMs": 94,
+      "artifactBytes": 35368,
+      "measurements": {
+        "startup": {
+          "medianMs": 1.83,
+          "result": 1
+        },
+        "scan": {
+          "medianMs": 18.48,
+          "result": 9952672569655435000
+        },
+        "parallel": {
+          "medianMs": 11.27,
+          "result": 9952672569655435000
+        },
+        "graph": {
+          "medianMs": 2.69,
+          "result": 9998
+        },
+        "incremental": {
+          "medianMs": 5.47,
+          "result": 667148
+        },
+        "ssr": {
+          "medianMs": 11.43,
+          "result": 7162719082490687000
+        },
+        "refresh": {
+          "medianMs": 9.78,
+          "result": 5906687639445546000
+        }
+      }
+    }
+  ]
+}
