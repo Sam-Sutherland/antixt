@@ -45,7 +45,7 @@ fn quick_start() -> Html {
                 ))
                 .child(code_block(
                     "Terminal",
-                    "cargo install --path antixt\nantixt create hello-antixt\nantixt routes .apps/hello-antixt\nantixt check .apps/hello-antixt",
+                    "cargo install --git https://github.com/Sam-Sutherland/antixt antixt\nantixt create hello-antixt\nantixt routes .apps/hello-antixt\nantixt check .apps/hello-antixt",
                 )),
         ))
         .child(section(

@@ -5,12 +5,15 @@ web applications.
 
 ## Installation
 
-From an antixt source checkout:
+From GitHub:
 
 ```sh
-cargo install --path antixt
+cargo install --git https://github.com/Sam-Sutherland/antixt antixt
 antixt version
 ```
+
+Framework contributors can instead install the current checkout with
+`cargo install --path antixt` from the repository root.
 
 The resulting `antixt` executable is self-contained. Generated applications
 vendor its matching framework library under `.antixt/framework`, so they remain

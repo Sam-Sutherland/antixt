@@ -18,7 +18,7 @@ island.
 ## Quick start
 
 ```sh
-cargo install --path antixt
+cargo install --git https://github.com/Sam-Sutherland/antixt antixt
 
 antixt create hello-antixt
 antixt check .apps/hello-antixt

@@ -136,7 +136,7 @@ pub fn page(_context: Context<'_>) -> Html {
                 ))
                 (code_block(
                     "Terminal",
-                    "cargo install --path antixt\nantixt create hello-antixt\nantixt dev .apps/hello-antixt\n\n# production\nantixt build .apps/hello-antixt",
+                    "cargo install --git https://github.com/Sam-Sutherland/antixt antixt\nantixt create hello-antixt\nantixt dev .apps/hello-antixt\n\n# production\nantixt build .apps/hello-antixt",
                 ))
             }
         }
